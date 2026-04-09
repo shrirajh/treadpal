@@ -26,7 +26,8 @@ Config in `treadpal.json`:
     "speed_is_mph": true,
     "host": "0.0.0.0",
     "bpm_min_speed_kmh": 4.0,
-    "bpm_max_speed_kmh": 7.0
+    "bpm_max_speed_kmh": 7.0,
+    "bpm_harmonics": [0.25, 0.5, 1.0, 2.0, 4.0]
 }
 ```
 
@@ -60,7 +61,7 @@ uv run bpm_agent.py --server ws://<server-ip>:8080/ws/audio
 ## How BPM sync works
 
 1. Detect BPM from audio using [beat_this](https://github.com/CPJKU/beat_this) (ISMIR 2024)
-2. Generate harmonic candidates (BPM x 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
+2. Generate harmonic candidates from configurable list (default: `[0.25, 0.5, 1.0, 2.0, 4.0]`)
 3. For each candidate, score by how closely the implied stride matches the biomechanically natural stride at each speed in your configured range
 4. Pick the best (harmonic, speed) pair
 5. Ramp treadmill speed toward it at 0.1 km/h per step
