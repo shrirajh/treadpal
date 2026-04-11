@@ -34,7 +34,8 @@ class TreadPalConfig:
     incline_range: float = 4.0  # Max ± offset from home
 
     # Treadmill quirks
-    speed_is_mph: bool = False  # Set True if treadmill interprets FTMS speed as mph
+    speed_send_mph: bool = False  # Treadmill interprets speed commands as mph
+    speed_recv_mph: bool = False  # Treadmill reports speed in mph
     speed_step_kmh: float = 0.01  # Treadmill speed resolution in km/h (0.16 for 0.1mph treadmills)
 
     # Audio
@@ -68,7 +69,8 @@ class TreadPalConfig:
             "TREADPAL_BPM_MIN_SPEED_KMH": float,
             "TREADPAL_BPM_MAX_SPEED_KMH": float,
             "TREADPAL_BPM_UPDATE_INTERVAL_S": float,
-            "TREADPAL_SPEED_IS_MPH": lambda v: v.lower() in ("true", "1", "yes"),
+            "TREADPAL_SPEED_SEND_MPH": lambda v: v.lower() in ("true", "1", "yes"),
+            "TREADPAL_SPEED_RECV_MPH": lambda v: v.lower() in ("true", "1", "yes"),
             "TREADPAL_AUDIO_SAMPLE_RATE": int,
             "TREADPAL_AUDIO_HOP_SIZE": int,
             "TREADPAL_AUDIO_WIN_SIZE": int,

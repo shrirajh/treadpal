@@ -132,7 +132,7 @@ class FTMSClient:
         self, _char: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         parsed = parse_treadmill_data(data)
-        if self._state.config.speed_is_mph:
+        if self._state.config.speed_recv_mph:
             parsed = parsed.model_copy(
                 update={"speed_kmh": round(parsed.speed_kmh * 1.60934, 2)}
             )
@@ -185,8 +185,8 @@ class FTMSClient:
         """Set target speed. FTMS uses 0.01 km/h resolution."""
         await self._request_control()
         speed = speed_kmh
-        if self._state.config.speed_is_mph:
-            speed = speed_kmh / 1.60934  # Convert km/h to mph for quirky firmware
+        if self._state.config.speed_send_mph:
+            speed = speed_kmh / 1.60934
         value = round(speed * 100)
         payload = bytes([0x02]) + value.to_bytes(2, "little", signed=False)
         await self._write_control(payload)

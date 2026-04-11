@@ -47,8 +47,10 @@ async def audio_websocket(ws: WebSocket, sr: int = Query(default=44100)) -> None
     last_incline_time = 0.0
     incline_interval = 30.0
 
+    last_sent_speed: float | None = None
+
     async def _analyze_loop() -> None:
-        nonlocal current_speed, last_incline_time
+        nonlocal current_speed, last_incline_time, last_sent_speed
 
         # Wait for warmup
         while buf.seconds_available < warmup_seconds:
@@ -97,6 +99,8 @@ async def audio_websocket(ws: WebSocket, sr: int = Query(default=44100)) -> None
             result = state.bpm_sync.compute(bpm)
             target_speed = result.speed_kmh
 
+            # Check if user manually changed speed on the treadmill
+            # Compare against what we last SENT, not our ramp target
             # Ramp toward target
             if current_speed is None:
                 current_speed = target_speed
@@ -108,12 +112,13 @@ async def audio_websocket(ws: WebSocket, sr: int = Query(default=44100)) -> None
                     current_speed += max_ramp if diff > 0 else -max_ramp
                 current_speed = round(current_speed, 2)
 
-            # Send speed to treadmill
-            if state.ftms_client is not None:
+            # Send speed to treadmill (skip if paused)
+            if current_speed is not None and not state.bpm_paused and state.ftms_client is not None:
                 from treadpal.ble.ftms_client import FTMSClient
                 assert isinstance(state.ftms_client, FTMSClient)
                 if state.ftms_client.is_connected:
                     await state.ftms_client.set_target_speed(current_speed)
+                    last_sent_speed = current_speed
                     logger.info("BPM=%.1f -> %.2f km/h (ramp=%.2f, x%.2f)",
                                 bpm, target_speed, current_speed, result.selected_harmonic)
 
@@ -139,7 +144,9 @@ async def audio_websocket(ws: WebSocket, sr: int = Query(default=44100)) -> None
                 "target_speed_kmh": target_speed,
                 "ramped_speed_kmh": current_speed,
                 "harmonic": result.selected_harmonic,
+                "harmonic_override": result.harmonic_override,
                 "stride_m": result.implied_stride_m,
+                "paused": state.bpm_paused,
             }
             if incline is not None:
                 status["incline_pct"] = incline

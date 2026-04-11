@@ -38,6 +38,7 @@ class BpmSyncConfig(BaseModel):
 
     min_speed_kmh: float = 4.0
     max_speed_kmh: float = 7.0
+    harmonics: list[float] | None = None
 
 
 class BpmUpdate(BaseModel):

@@ -183,5 +183,53 @@ async def update_bpm_config(
     else:
         state.bpm_sync.min_speed_kmh = config.min_speed_kmh
         state.bpm_sync.max_speed_kmh = config.max_speed_kmh
+        if config.harmonics is not None:
+            state.bpm_sync.harmonics = tuple(config.harmonics)
 
     return config
+
+
+@router.post("/bpm/harmonic/up")
+async def harmonic_up(request: Request) -> dict[str, object]:
+    """Shift to next higher harmonic (manual override)."""
+    state = get_state(request.app)
+    if state.bpm_sync is None:
+        raise HTTPException(status_code=409, detail="BPM sync not active")
+    h = state.bpm_sync.shift_harmonic(+1)
+    return {"forced_harmonic": h, "harmonics": list(state.bpm_sync.harmonics)}
+
+
+@router.post("/bpm/harmonic/down")
+async def harmonic_down(request: Request) -> dict[str, object]:
+    """Shift to next lower harmonic (manual override)."""
+    state = get_state(request.app)
+    if state.bpm_sync is None:
+        raise HTTPException(status_code=409, detail="BPM sync not active")
+    h = state.bpm_sync.shift_harmonic(-1)
+    return {"forced_harmonic": h, "harmonics": list(state.bpm_sync.harmonics)}
+
+
+@router.post("/bpm/harmonic/reset")
+async def harmonic_reset(request: Request) -> dict[str, str]:
+    """Clear harmonic override, return to auto."""
+    state = get_state(request.app)
+    if state.bpm_sync is None:
+        raise HTTPException(status_code=409, detail="BPM sync not active")
+    state.bpm_sync.reset_harmonic()
+    return {"status": "auto"}
+
+
+@router.post("/bpm/pause")
+async def bpm_pause(request: Request) -> dict[str, str]:
+    """Pause BPM speed control (keeps detecting, stops sending to treadmill)."""
+    state = get_state(request.app)
+    state.bpm_paused = True
+    return {"status": "paused"}
+
+
+@router.post("/bpm/resume")
+async def bpm_resume(request: Request) -> dict[str, str]:
+    """Resume BPM speed control."""
+    state = get_state(request.app)
+    state.bpm_paused = False
+    return {"status": "resumed"}

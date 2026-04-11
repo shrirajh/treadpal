@@ -29,6 +29,7 @@ class AppState:
         # BPM sync
         self.bpm_sync: BpmSyncController | None = None
         self.bpm_task: asyncio.Task[None] | None = None
+        self.bpm_paused: bool = False
         # Lock for connect/disconnect transitions
         self.lock = asyncio.Lock()
 
