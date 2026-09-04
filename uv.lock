@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-02T14:17:06.7193965Z"
+exclude-newer = "2026-08-28T05:39:49.1451958Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -130,8 +130,8 @@ wheels = [
 
 [[package]]
 name = "beat-this"
-version = "0.1"
-source = { url = "https://github.com/CPJKU/beat_this/archive/main.zip" }
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "numpy" },
@@ -140,16 +140,9 @@ dependencies = [
     { name = "torch" },
     { name = "torchaudio" },
 ]
-sdist = { hash = "sha256:46c6186bef1d9f24e28ac3809304911ba983e395cb59201123b2b665610828e9" }
-
-[package.metadata]
-requires-dist = [
-    { name = "einops" },
-    { name = "numpy", specifier = ">=1.20" },
-    { name = "rotary-embedding-torch" },
-    { name = "soxr" },
-    { name = "torch", specifier = ">=2" },
-    { name = "torchaudio" },
+sdist = { url = "https://files.pythonhosted.org/packages/d1/c4/7ce01e047c1e8d99490e95172d710e08901c24fb24e19a5dd4f885177c99/beat_this-1.1.0.tar.gz", hash = "sha256:3017c741f972972a650edcaccfe5760687fe4f5587feaa98896d90f866c2435c", size = 40635, upload-time = "2026-04-14T10:16:39.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/0e/e23cbbe6e3efcd54e84dec22b6d88954655036a993cc3843ab741bc24de4/beat_this-1.1.0-py3-none-any.whl", hash = "sha256:3f2b2d1e027c6dac380bf80c71555e3c28a4036a7f1af20129a945915a72a645", size = 40060, upload-time = "2026-04-14T10:16:37.955Z" },
 ]
 
 [[package]]
@@ -1666,7 +1659,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20,<1" },
     { name = "aubio", marker = "extra == 'aubio'", specifier = ">=0.4.9" },
-    { name = "beat-this", url = "https://github.com/CPJKU/beat_this/archive/main.zip" },
+    { name = "beat-this", specifier = "==1.1.0" },
     { name = "bleak", specifier = ">=0.22,<1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.27,<1" },
