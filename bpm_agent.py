@@ -11,6 +11,11 @@
 # ///
 """TreadPal BPM Agent — streams audio to server, shows live TUI.
 
+Alongside the raw stereo audio (for server-side beat detection and stem
+separation into vocals/other/bass/drums) it sends ~40 fps
+visualiser frames: log spectrum split into bass/mid/high, zone energies,
+a 12-note chroma with the dominant note, and kick/bass onsets.
+
     uv run bpm_agent.py --server ws://192.168.1.50:8080/ws/audio
     uv run bpm_agent.py --list-devices
 
@@ -102,9 +107,10 @@ def _start_wasapi(device_index: int | None, queue: asyncio.Queue[bytes], loop: a
 
     def callback(in_data: bytes | None, frame_count: int, time_info: object, status: int) -> tuple[None, int]:
         if in_data:
-            samples = np.frombuffer(in_data, dtype=np.float32)
-            if channels > 1:
-                samples = samples.reshape(-1, channels).mean(axis=1).astype(np.float32)
+            # Stereo (interleaved) for the server's stem separator; mono is duplicated
+            samples = np.frombuffer(in_data, dtype=np.float32).reshape(-1, channels)
+            samples = samples[:, :2] if channels >= 2 else np.repeat(samples, 2, axis=1)
+            samples = np.ascontiguousarray(samples)
             try:
                 loop.call_soon_threadsafe(queue.put_nowait, samples.tobytes())
             except asyncio.QueueFull:
@@ -113,7 +119,7 @@ def _start_wasapi(device_index: int | None, queue: asyncio.Queue[bytes], loop: a
 
     stream = p.open(
         format=pyaudio.paFloat32, channels=channels, rate=sr,
-        input=True, frames_per_buffer=2048,
+        input=True, frames_per_buffer=1024,
         input_device_index=int(info["index"]),
         stream_callback=callback,
     )
@@ -144,13 +150,14 @@ def _start_sounddevice(device_index: int | None, queue: asyncio.Queue[bytes], lo
 
     def callback(indata: NDArray[np.float32], frames: int, time_info: object, status: object) -> None:
         try:
-            loop.call_soon_threadsafe(queue.put_nowait, indata[:, 0].copy().tobytes())
+            stereo = indata[:, :2] if indata.shape[1] >= 2 else np.repeat(indata[:, :1], 2, axis=1)
+            loop.call_soon_threadsafe(queue.put_nowait, np.ascontiguousarray(stereo).tobytes())
         except asyncio.QueueFull:
             pass
 
     stream = sd.InputStream(
-        device=device, channels=1, samplerate=sr,
-        blocksize=2048, dtype=np.float32, callback=callback,
+        device=device, channels=min(2, int(sd.query_devices(device)["max_input_channels"])), samplerate=sr,
+        blocksize=1024, dtype=np.float32, callback=callback,
     )
     stream.start()
     return stream, sr
@@ -165,6 +172,137 @@ def stop_capture(handle: object) -> None:
     else:
         handle.stop()  # type: ignore[union-attr]
         handle.close()  # type: ignore[union-attr]
+
+
+# --- Visualiser analysis ---
+
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+class Analyzer:
+    """Spectrum, bass/mid/high energy, chroma and onsets from a rolling window.
+
+    Long window (8192) for frequency detail (bass notes are ~4 Hz apart);
+    short window (2048) for onset timing, which a long window would smear.
+    """
+
+    # (low Hz, high Hz, bands) per zone: bass, mid, high
+    ZONES = ((30.0, 250.0, 12), (250.0, 4000.0, 20), (4000.0, 16000.0, 12))
+
+    def __init__(self, sr: int, n_fft: int = 8192, n_short: int = 2048) -> None:
+        self.sr = sr
+        self.n = n_fft
+        self.n_short = n_short
+        self.buf = np.zeros(n_fft, dtype=np.float32)
+        self.win = np.hanning(n_fft).astype(np.float32)
+        self.win_short = np.hanning(n_short).astype(np.float32)
+        freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
+        nyq = sr / 2 * 0.95
+
+        # Band bin ranges (log-spaced within each zone) and per-band tilt
+        self.bands: list[tuple[int, int]] = []
+        centers: list[float] = []
+        self.zone_bins: list[slice] = []
+        for lo, hi, count in self.ZONES:
+            hi = min(hi, nyq)
+            edges = np.geomspace(lo, hi, count + 1)
+            idx = np.searchsorted(freqs, edges)
+            for a, b in zip(idx[:-1], idx[1:]):
+                b = max(b, a + 1)
+                self.bands.append((int(a), int(b)))
+                centers.append(float(np.sqrt(freqs[a] * freqs[b - 1])) or 1.0)
+            self.zone_bins.append(slice(int(idx[0]), int(idx[-1])))
+        # Music falls ~3 dB/octave; tilt it flat so highs aren't always tiny
+        self.tilt_db = 3.0 * np.log2(np.maximum(centers, 1.0) / 1000.0)
+
+        # Chroma: map bins in 55 Hz - 2 kHz to pitch classes (C = 0).
+        # Linear bins crowd high octaves, so weight by 1/f to keep octaves even.
+        sel = np.nonzero((freqs >= 55.0) & (freqs <= 2000.0))[0]
+        self.chroma_bins = sel
+        midi = 69 + 12 * np.log2(freqs[sel] / 440.0)
+        self.chroma_pc = np.round(midi).astype(int) % 12
+        self.chroma_w = 1.0 / freqs[sel]
+
+        # Onsets from the short window's low end (kick + bass notes)
+        f_short = np.fft.rfftfreq(n_short, 1.0 / sr)
+        self.kick = slice(int(np.searchsorted(f_short, 30.0)), int(np.searchsorted(f_short, 300.0)))
+        self.prev_kick: np.ndarray | None = None
+        self.flux_hist: deque[float] = deque(maxlen=48)  # ~1 s
+        self.last_onset = -1.0
+        self.clock = 0.0  # Seconds of audio analysed (sample clock)
+
+        # Adaptive loudness references (dB), rise instantly, relax slowly
+        self.ref_db = -60.0
+        self.zone_ref = np.full(3, -60.0)
+
+    def feed(self, samples: NDArray[np.float32]) -> dict:
+        n = len(samples)
+        self.clock += n / self.sr
+        if n >= self.n:
+            self.buf[:] = samples[-self.n:]
+        else:
+            self.buf[:-n] = self.buf[n:]
+            self.buf[-n:] = samples
+        rms = float(np.sqrt(np.mean(samples ** 2))) if n else 0.0
+        if rms < 1e-4:
+            self.prev_kick = None
+            return {"type": "viz", "silent": True, "rms": 0.0}
+
+        mag = np.abs(np.fft.rfft(self.buf * self.win)) / (self.n / 4)
+        power = mag ** 2
+
+        # Spectrum
+        band_db = 10 * np.log10(np.array([power[a:b].mean() for a, b in self.bands]) + 1e-12)
+        band_db += self.tilt_db
+        self.ref_db = max(float(band_db.max()), self.ref_db - 0.06, -80.0)
+        spec = np.clip((band_db - (self.ref_db - 48.0)) / 48.0, 0.0, 1.0)
+
+        # Zones: each normalised to its own recent peak, so quiet highs still show movement
+        zone_db = 10 * np.log10(np.array([power[z].sum() for z in self.zone_bins]) + 1e-12)
+        self.zone_ref = np.maximum(zone_db, np.maximum(self.zone_ref - 0.04, -80.0))
+        zones = np.clip((zone_db - (self.zone_ref - 30.0)) / 30.0, 0.0, 1.0)
+
+        # Chroma
+        chroma = np.bincount(
+            self.chroma_pc, weights=power[self.chroma_bins] * self.chroma_w, minlength=12
+        )
+        peak = float(chroma.max())
+        if peak > 0:
+            chroma = chroma / peak
+            note = int(chroma.argmax())
+            # 1 when one note stands alone, 0 when everything is equally loud
+            conf = float(1.0 - (chroma.sum() - 1.0) / 11.0)
+        else:
+            note, conf = 0, 0.0
+
+        # Onset: positive spectral flux in the low end, over an adaptive threshold
+        short = np.abs(np.fft.rfft(self.buf[-self.n_short:] * self.win_short))
+        kick = np.log1p(short[self.kick] * 10.0)
+        onset = 0.0
+        if self.prev_kick is not None:
+            flux = float(np.maximum(kick - self.prev_kick, 0.0).sum())
+            if len(self.flux_hist) >= 8:
+                h = np.array(self.flux_hist)
+                thr = float(h.mean() + 1.5 * h.std())
+                now = self.clock
+                if flux > thr and flux > 1e-3 and now - self.last_onset > 0.18:
+                    onset = float(min(1.0, (flux - thr) / (thr + 1e-6) + 0.3))
+                    self.last_onset = now
+            self.flux_hist.append(flux)
+        self.prev_kick = kick
+
+        r2 = lambda xs: [round(float(x), 2) for x in xs]  # noqa: E731
+        return {
+            "type": "viz",
+            "spec": r2(spec),
+            "zones": [z[2] for z in self.ZONES],
+            "bands": r2(zones),
+            "chroma": r2(chroma),
+            "note": note,
+            "conf": round(conf, 2),
+            "onset": round(onset, 2),
+            "rms": round(rms, 4),
+        }
 
 
 # --- TUI ---
@@ -182,6 +320,7 @@ class TUI:
         self.paused: bool = False
         self.connected: bool = False
         self.bpm_history: deque[float] = deque(maxlen=30)
+        self.viz: dict = {}
         self.speed_history: deque[float] = deque(maxlen=30)
         self._http = httpx.Client(timeout=2.0)
 
@@ -228,6 +367,16 @@ class TUI:
             h_label += " [yellow](override)[/]"
         grid.add_row("Harmonic", h_label)
 
+        v = self.viz
+        if v.get("bands"):
+            hue = v["note"] * 30
+            name = NOTE_NAMES[v["note"]]
+            grid.add_row("Note", Text(f"{name:<3}", style=f"bold {_hue_hex(hue)}") + Text(
+                f" ({v['conf']:.0%} clear)", style="dim"))
+            grid.add_row("Mix", Text(" ".join(
+                f"{label} {_bar(level)}" for label, level in zip(("bass", "mid", "high"), v["bands"])
+            ), style="dim"))
+
         grid.add_row("Target", f"{self.target_speed:.2f} km/h")
         grid.add_row("Speed", f"[bold]{self.ramped_speed:.2f}[/] km/h")
         grid.add_row("Stride", f"{self.stride:.3f} m")
@@ -255,6 +404,19 @@ class TUI:
         grid.add_row("", Text("(u)p  (d)own  (r)eset  (p)ause  (q)uit", style="dim"))
 
         return grid
+
+
+def _bar(level: float, width: int = 6) -> str:
+    filled = level * width
+    full = int(filled)
+    part = " ▏▎▍▌▋▊▉"[int((filled - full) * 8)] if full < width else ""
+    return ("█" * full + part).ljust(width, "·")
+
+
+def _hue_hex(hue: float) -> str:
+    import colorsys
+    r, g, b = colorsys.hls_to_rgb((hue % 360) / 360, 0.7, 0.6)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
 
 def _sparkline(values: list[float]) -> str:
@@ -305,8 +467,9 @@ async def run(ws_url: str, http_url: str, device_index: int | None) -> None:
     keys = KeyReader()
     tui = TUI(http_url)
     console = Console()
+    analyzer = Analyzer(sr)
 
-    full_url = f"{ws_url}?sr={sr}"
+    full_url = f"{ws_url}?sr={sr}&ch=2"  # Interleaved stereo
 
     try:
         with Live(tui.render(), console=console, refresh_per_second=4, screen=True) as live:
@@ -316,9 +479,18 @@ async def run(ws_url: str, http_url: str, device_index: int | None) -> None:
 
                 try:
                     async def send_audio() -> None:
+                        last_render = 0.0
                         while True:
                             data = await audio_queue.get()
                             await ws.send(data)
+                            mono = np.frombuffer(data, dtype=np.float32).reshape(-1, 2).mean(axis=1)
+                            frame = analyzer.feed(mono.astype(np.float32))
+                            await ws.send(json.dumps(frame, separators=(",", ":")))
+                            now = time.monotonic()
+                            if now - last_render > 0.25:
+                                last_render = now
+                                tui.viz = frame
+                                live.update(tui.render())
 
                     async def recv_status() -> None:
                         async for msg in ws:

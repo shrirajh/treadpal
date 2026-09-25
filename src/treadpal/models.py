@@ -17,6 +17,14 @@ class TreadmillData(BaseModel):
     heart_rate_bpm: int | None
 
 
+class ValueRange(BaseModel):
+    """Supported min/max/step for a controllable value."""
+
+    min: float
+    max: float
+    step: float
+
+
 class TreadmillStatus(BaseModel):
     """Current connection and operational status."""
 
@@ -25,6 +33,15 @@ class TreadmillStatus(BaseModel):
     device_address: str | None
     last_data: TreadmillData | None
     supported_features: list[str]
+    # Last known targets: from our own commands or the treadmill's status notifications
+    target_speed_kmh: float | None = None
+    target_incline_pct: float | None = None
+    machine_state: str | None = None  # "running" | "paused" | "stopped"
+    speed_range: ValueRange | None = None
+    incline_range: ValueRange | None = None
+    prefers_mph: bool = False
+    speed_resolution_kmh: float = 0.01  # Smallest speed change the treadmill makes
+    motion_estimated: bool = False  # last_data speed/incline are estimates (treadmill reports targets)
 
 
 class ControlCommand(BaseModel):
@@ -61,6 +78,12 @@ class BpmSyncStatus(BaseModel):
     commanded_speed_kmh: float | None
     min_speed_kmh: float
     max_speed_kmh: float
+    paused: bool = False
+    audio_clients: int = 0
+    stems: str = "off"  # Stem separation: off, preparing, ready, error
+    harmonic_override: bool = False
+    harmonics: list[float] = []
+    age_s: float | None = None  # Seconds since the last BPM result
 
 
 class HistorySummary(BaseModel):

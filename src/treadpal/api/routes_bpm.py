@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -110,9 +111,10 @@ async def update_bpm(request: Request, body: BpmUpdate) -> dict[str, object]:
         state.bpm_sync = _make_controller(None, state.config)
 
     result = state.bpm_sync.compute(body.bpm)
+    state.bpm_updated_at = time.monotonic()
 
-    # Send to treadmill if connected
-    if state.ftms_client is not None:
+    # Send to treadmill if connected (skip if paused)
+    if state.ftms_client is not None and not state.bpm_paused:
         from treadpal.ble.ftms_client import FTMSClient
 
         assert isinstance(state.ftms_client, FTMSClient)
@@ -139,12 +141,18 @@ async def update_bpm(request: Request, body: BpmUpdate) -> dict[str, object]:
 async def get_bpm_status(request: Request) -> BpmSyncStatus:
     state = get_state(request.app)
     controller = state.bpm_sync
-    active = state.bpm_task is not None and not state.bpm_task.done()
+    local_running = state.bpm_task is not None and not state.bpm_task.done()
+    active = local_running or state.audio_clients > 0
+    age_s = (
+        time.monotonic() - state.bpm_updated_at
+        if state.bpm_updated_at is not None
+        else None
+    )
 
     if controller is None:
         cfg = state.config
         return BpmSyncStatus(
-            active=False,
+            active=active,
             detected_bpm=None,
             selected_harmonic=None,
             effective_cadence=None,
@@ -154,6 +162,10 @@ async def get_bpm_status(request: Request) -> BpmSyncStatus:
             commanded_speed_kmh=None,
             min_speed_kmh=cfg.bpm_min_speed_kmh,
             max_speed_kmh=cfg.bpm_max_speed_kmh,
+            paused=state.bpm_paused,
+            audio_clients=state.audio_clients,
+            stems=state.stems_status,
+            harmonics=list(cfg.bpm_harmonics),
         )
 
     last = controller.last_result
@@ -168,6 +180,12 @@ async def get_bpm_status(request: Request) -> BpmSyncStatus:
         commanded_speed_kmh=last.speed_kmh if last else None,
         min_speed_kmh=controller.min_speed_kmh,
         max_speed_kmh=controller.max_speed_kmh,
+        paused=state.bpm_paused,
+        audio_clients=state.audio_clients,
+        stems=state.stems_status,
+        harmonic_override=controller.forced_harmonic is not None,
+        harmonics=list(controller.harmonics),
+        age_s=age_s,
     )
 
 

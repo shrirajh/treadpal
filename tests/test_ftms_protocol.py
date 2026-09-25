@@ -7,7 +7,10 @@ import struct
 from treadpal.ble.ftms_protocol import (
     parse_features,
     parse_heart_rate,
+    parse_incline_range,
     parse_machine_status,
+    parse_speed_range,
+    parse_status_value,
     parse_treadmill_data,
 )
 
@@ -139,3 +142,31 @@ class TestParseHeartRate:
         """Flags bit 0 = 1: HR is uint16 LE."""
         data = bytes([0x01]) + struct.pack("<H", 165)
         assert parse_heart_rate(data) == 165
+
+
+class TestParseStatusValue:
+    def test_target_speed(self) -> None:
+        assert parse_status_value(struct.pack("<BH", 0x05, 550)) == 5.5
+
+    def test_target_incline_negative(self) -> None:
+        assert parse_status_value(struct.pack("<Bh", 0x06, -25)) == -2.5
+
+    def test_other_opcode(self) -> None:
+        assert parse_status_value(bytes([0x04, 0x00, 0x00])) is None
+
+    def test_truncated(self) -> None:
+        assert parse_status_value(bytes([0x05, 0x01])) is None
+
+
+class TestParseRanges:
+    def test_speed_range(self) -> None:
+        data = struct.pack("<HHH", 100, 1200, 10)
+        assert parse_speed_range(data) == (1.0, 12.0, 0.1)
+
+    def test_incline_range(self) -> None:
+        data = struct.pack("<hhH", -30, 150, 5)
+        assert parse_incline_range(data) == (-3.0, 15.0, 0.5)
+
+    def test_truncated(self) -> None:
+        assert parse_speed_range(bytes([0x00, 0x01])) is None
+        assert parse_incline_range(b"") is None

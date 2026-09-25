@@ -14,6 +14,7 @@ async def get_status(request: Request) -> TreadmillStatus:
     connected = False
     device_name: str | None = None
     device_address: str | None = None
+    data = state.last_data
 
     if state.ftms_client is not None:
         from treadpal.ble.ftms_client import FTMSClient
@@ -22,13 +23,22 @@ async def get_status(request: Request) -> TreadmillStatus:
         connected = bool(state.ftms_client.is_connected)
         device_name = state.ftms_client.device_name
         device_address = state.ftms_client.device_address
+        data = state.ftms_client.current_data()
 
     return TreadmillStatus(
         connected=connected,
         device_name=device_name,
         device_address=device_address,
-        last_data=state.last_data,
+        last_data=data,
         supported_features=state.supported_features,
+        target_speed_kmh=state.target_speed_kmh,
+        target_incline_pct=state.target_incline_pct,
+        machine_state=state.machine_state,
+        speed_range=state.speed_range,
+        incline_range=state.incline_range,
+        prefers_mph=state.config.speed_send_mph or state.config.speed_recv_mph,
+        speed_resolution_kmh=state.config.speed_resolution_kmh,
+        motion_estimated=state.motion_estimated,
     )
 
 
@@ -36,6 +46,22 @@ async def get_status(request: Request) -> TreadmillStatus:
 async def get_features(request: Request) -> list[str]:
     state = get_state(request.app)
     return state.supported_features
+
+
+@router.get("/debug/ble")
+async def debug_ble(request: Request) -> dict[str, object]:
+    """Recent raw BLE traffic: treadmill data packets (newest last) and events
+    (status notifications, control writes and the treadmill's responses)."""
+    state = get_state(request.app)
+    return {
+        "config": {
+            "speed_send_mph": state.config.speed_send_mph,
+            "speed_recv_mph": state.config.speed_recv_mph,
+            "speed_command_step": state.config.speed_command_step,
+        },
+        "packets": list(state.ble_packets),
+        "events": list(state.ble_events),
+    }
 
 
 @router.get("/devices")

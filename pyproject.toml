@@ -17,12 +17,18 @@ dependencies = [
     "torchaudio>=2.11.0",
     "websockets>=16.0",
     "librosa>=0.11.0",
+    "onnxruntime>=1.20,<2",  # Stem separation (model vendored in treadpal/vendor/hs_tasnet)
+    "soxr>=0.5",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+]
+# Rebuilding the vendored stem model (treadpal/vendor/hs_tasnet/build_model.py)
+stems-build = [
+    "onnx>=1.19",
 ]
 aubio = [
     "aubio>=0.4.9",

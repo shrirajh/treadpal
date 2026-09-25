@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0e11">
+  <title>TreadPal</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='13' width='26' height='7' rx='3.5' fill='%2386d3bf' transform='rotate(-12 16 16)'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="offline">
+  <div class="app">
+    <header class="top">
+      <div class="brand"><span class="brand-mark"></span><span class="brand-name">treadpal</span></div>
+      <div class="top-right">
+        <div class="seg seg-sm" id="unit-toggle" role="group" aria-label="Units">
+          <button data-unit="kmh">km/h</button>
+          <button data-unit="mph">mph</button>
+        </div>
+        <div class="conn" id="conn"><span class="conn-dot"></span><span id="conn-text">Connecting…</span></div>
+        <button class="icon-btn" id="settings-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="settings" id="settings" hidden>
+      <label>Slow-down pace
+        <span class="field"><input type="number" id="slow-pace" step="0.1" min="0"><span class="u-speed">km/h</span></span>
+      </label>
+      <label title="Shift the beat visuals if they feel early or late (speakers and Bluetooth add delay)">Beat offset
+        <input type="range" id="beat-offset" min="-300" max="300" step="10"><span id="beat-offset-val" class="mono">0 ms</span>
+      </label>
+      <button class="text-btn" id="reset-presets">Restore default presets</button>
+    </div>
+
+    <div class="resume" id="resume" hidden>
+      <div class="resume-text"><b>Pick up where you left off?</b><small id="resume-detail"></small></div>
+      <button class="resume-btn" id="resume-yes">Continue session</button>
+      <button class="text-btn" id="resume-no">Start fresh</button>
+    </div>
+
+    <main class="main">
+      <section class="readout" id="speed-panel" data-kind="speed">
+        <div class="r-label">Speed <span class="est-tag" title="Your treadmill reports its target, not where it actually is, so this is estimated from typical motor speeds (motion_*_rate settings)">est.</span> <span class="music-tag" id="music-tag">♪ music</span></div>
+        <div class="r-value">
+          <button class="num" id="speed-num" title="Click to type a speed">0.0</button>
+          <span class="r-unit u-speed">km/h</span>
+        </div>
+        <div class="r-target" id="speed-target"><span class="t-dot"></span><span class="t-text"></span></div>
+        <div class="track" id="speed-track" title="Click or drag to set speed">
+          <div class="t-band"></div><div class="t-fill"></div><div class="t-tick"></div>
+        </div>
+        <div class="track-scale"><span id="speed-min"></span><span id="speed-max"></span></div>
+        <div class="steppers">
+          <button class="step" data-act="speed-down" aria-label="Slower">−</button>
+          <button class="step" data-act="speed-up" aria-label="Faster">+</button>
+        </div>
+      </section>
+
+      <section class="stage-wrap" id="stage-wrap">
+        <svg id="stage" viewBox="96 14 744 406" aria-label="Treadmill">
+          <defs>
+            <linearGradient id="floor-grad" gradientUnits="userSpaceOnUse" x1="100" x2="836">
+              <stop offset="0" stop-color="#2a3038" stop-opacity="0" />
+              <stop offset=".2" stop-color="#2a3038" />
+              <stop offset=".8" stop-color="#2a3038" />
+              <stop offset="1" stop-color="#2a3038" stop-opacity="0" />
+            </linearGradient>
+            <radialGradient id="glow">
+              <stop offset="0" style="stop-color:var(--target)" stop-opacity=".35" />
+              <stop offset="1" style="stop-color:var(--target)" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+
+          <line class="floor" x1="100" y1="400" x2="836" y2="400" />
+          <g id="scale"></g>
+          <path id="arc-actual" class="arc-actual" />
+
+          <!-- Where the deck is heading -->
+          <g id="ghost" class="ghost">
+            <path id="ghost-belt" />
+            <line id="ghost-axis" />
+          </g>
+
+          <path id="rear-foot" class="frame" />
+          <g id="leg">
+            <rect id="leg-sleeve" class="frame" width="14" height="22" rx="3" />
+            <line id="leg-rod" class="rod" />
+          </g>
+
+          <g id="deck">
+            <rect id="deck-frame" class="frame" rx="9" />
+            <g id="tilt-grab" class="grab-tilt">
+              <path id="upright" class="upright" />
+              <line id="handlebar" class="upright thin" />
+              <g id="console">
+                <rect id="console-body" class="console" rx="7" />
+                <rect id="console-screen" class="console-screen" rx="3" />
+                <text id="console-text" class="console-text"></text>
+              </g>
+            </g>
+            <path id="belt-base" class="belt-base" />
+            <path id="belt-slats" class="belt-slats" />
+            <g id="steps"></g>
+            <g id="roller-rear" class="roller"><circle r="11" /><line x1="-7" y1="0" x2="7" y2="0" /></g>
+            <g id="roller-front" class="roller"><circle r="11" /><line x1="-7" y1="0" x2="7" y2="0" /></g>
+            <rect id="belt-grab" class="grab-belt" />
+            <text id="hint-belt" class="hint">‹ drag belt to speed up · slow down ›</text>
+          </g>
+
+          <g id="handle" class="grab-tilt handle">
+            <circle class="handle-glow" r="26" fill="url(#glow)" />
+            <circle class="handle-ring" r="10" />
+            <circle class="handle-core" r="3" />
+          </g>
+          <path id="target-notch" class="target-notch" d="M 0 0 L 9 -5 L 9 5 Z" />
+          <text id="hint-tilt" class="hint" text-anchor="middle">drag to tilt</text>
+        </svg>
+        <div class="stage-overlay" id="stage-overlay"><span class="pulse"></span><span id="overlay-text">Looking for your treadmill…</span></div>
+      </section>
+
+      <section class="readout" id="incline-panel" data-kind="incline">
+        <div class="r-label">Incline <span class="est-tag" title="Your treadmill reports its target, not where it actually is, so this is estimated from typical motor speeds (motion_*_rate settings)">est.</span></div>
+        <div class="r-value">
+          <button class="num" id="incline-num" title="Click to type an incline">0.0</button>
+          <span class="r-unit">%</span>
+        </div>
+        <div class="r-target" id="incline-target"><span class="t-dot"></span><span class="t-text"></span></div>
+        <div class="track" id="incline-track" title="Click or drag to set incline">
+          <div class="t-fill"></div><div class="t-tick"></div>
+        </div>
+        <div class="track-scale"><span id="incline-min"></span><span id="incline-max"></span></div>
+        <div class="steppers">
+          <button class="step" data-act="incline-down" aria-label="Lower">−</button>
+          <button class="step" data-act="incline-up" aria-label="Higher">+</button>
+        </div>
+      </section>
+    </main>
+
+    <section class="controls">
+      <div class="presets" id="presets"></div>
+      <div class="quick">
+        <button class="action" data-act="slow">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+          <span><b>Slow down</b><small id="slow-sub"></small></span>
+        </button>
+        <button class="action" data-act="flat">
+          <svg viewBox="0 0 24 24"><path d="M4 15h16" /><path d="M8 9l4-3 4 3" opacity=".35" /></svg>
+          <span><b>Go flat</b><small>to 0%</small></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="run">
+      <div class="seg seg-lg" id="lifecycle" role="group" aria-label="Treadmill">
+        <button data-act="start" data-state="running"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" /></svg>Start</button>
+        <button data-act="pause" data-state="paused"><svg viewBox="0 0 24 24"><path d="M8 5.5v13M16 5.5v13" /></svg>Pause</button>
+        <button data-act="stop" data-state="stopped"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" /></svg>Stop</button>
+      </div>
+      <div class="session-line"><span id="session-text"></span><button class="text-btn" id="session-new">New session</button></div>
+      <dl class="stats">
+        <div><dt>Time</dt><dd id="st-time">0:00</dd></div>
+        <div><dt>Distance</dt><dd><span id="st-dist">0.00</span> <small id="st-dist-u">km</small></dd></div>
+        <div><dt>Pace</dt><dd><span id="st-pace">–</span> <small id="st-pace-u">/km</small></dd></div>
+        <div><dt>Energy</dt><dd><span id="st-kcal">0</span> <small>kcal</small></dd></div>
+        <div id="st-hr-wrap" hidden><dt>Heart</dt><dd><span id="st-hr">–</span> <small>bpm</small></dd></div>
+      </dl>
+    </section>
+
+
+    <section class="music idle" id="music">
+      <div class="m-head">
+        <span class="m-title"><span class="m-note">♪</span>Music</span>
+        <span class="pill" id="m-state">no source</span>
+        <span class="m-spacer"></span>
+        <label class="switch" title="Let the music set your speed">
+          <span>Follow the beat</span>
+          <input type="checkbox" id="m-follow"><span class="knob"></span>
+        </label>
+      </div>
+      <div class="m-viz">
+        <canvas id="viz-canvas"></canvas>
+        <div class="m-note-box">
+          <div class="m-note-name" id="m-note">–</div>
+          <div class="chroma" id="chroma" title="Notes present (C to B)"></div>
+          <small>dominant note</small>
+        </div>
+      </div>
+      <p class="m-empty">Stream audio from any computer with <code>bpm_agent.py</code> and TreadPal will match your pace to the beat.</p>
+      <div class="m-body">
+        <div class="m-bpm"><span class="beat" id="m-beat"></span><span id="m-bpm">–</span><small>BPM</small></div>
+        <div class="m-gear">
+          <button class="icon-btn" id="m-h-down" aria-label="Slower feel">‹</button>
+          <div class="m-gear-val"><span id="m-h">–</span><small id="m-cad"></small></div>
+          <button class="icon-btn" id="m-h-up" aria-label="Faster feel">›</button>
+          <button class="text-btn" id="m-auto" hidden>auto</button>
+        </div>
+        <div class="m-want"><small>music wants</small><span><b id="m-want">–</b> <span class="u-speed">km/h</span></span></div>
+        <div class="m-band">
+          <small>Tempo band <span id="m-band-text"></span></small>
+          <div class="dual" id="m-band">
+            <div class="dual-fill"></div>
+            <input type="range" id="m-band-lo" aria-label="Slowest music speed">
+            <input type="range" id="m-band-hi" aria-label="Fastest music speed">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="keys">
+      <span><kbd>↑</kbd><kbd>↓</kbd> speed</span>
+      <span><kbd>⇧</kbd>+<kbd>↑</kbd><kbd>↓</kbd> incline</span>
+      <span><kbd>S</kbd> slow down</span>
+      <span><kbd>F</kbd> flat</span>
+      <span><kbd>Space</kbd> start / pause</span>
+      <span><kbd>Esc</kbd> stop</span>
+    </footer>
+  </div>
+
+  <div class="journey" aria-hidden="true"><canvas id="journey-canvas"></canvas></div>
+
+  <div class="toast" id="toast" role="status"><span id="toast-text"></span><button id="toast-action" hidden></button></div>
+  <script src="app.js"></script>
+  <script src="music.js"></script>
+  <script src="journey.js"></script>
+  <script src="sessions.js"></script>
+</body>
+</html>

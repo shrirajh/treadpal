@@ -13,6 +13,8 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
+from treadpal.audio.beat_grid import BeatGrid, fit_beat_grid
+
 logger = logging.getLogger("treadpal.beat")
 
 _model: object = None
@@ -26,9 +28,17 @@ def _get_model() -> object:
             if _model is None:
                 from beat_this.inference import Audio2Beats
                 device = "cuda" if torch.cuda.is_available() else "cpu"
+                # More threads barely speed up an 8 s window (4: ~150 ms, 16: ~80 ms)
+                # but take cores from the stem separator and everything else
+                torch.set_num_threads(min(4, torch.get_num_threads()))
                 _model = Audio2Beats(checkpoint_path="final0", device=device)
                 logger.info("beat_this model loaded on %s", device)
     return _model
+
+
+def preload() -> None:
+    """Load the model ahead of the first detection."""
+    _get_model()
 
 
 class AudioBuffer:
@@ -77,8 +87,13 @@ class AudioBuffer:
         return min(self._total_written, self._max_samples) / self.sr
 
 
-def detect_bpm(audio: NDArray[np.float32], sr: int) -> float | None:
-    """Detect BPM using beat_this. Returns BPM or None if detection fails."""
+def detect_beats(audio: NDArray[np.float32], sr: int) -> tuple[float, BeatGrid | None] | None:
+    """Detect BPM and the beat grid using beat_this.
+
+    Returns (bpm, grid) or None if detection fails. BPM is folded into
+    60-180; the grid uses the folded period and positions are seconds from
+    the start of ``audio``.
+    """
     model = _get_model()
     tensor = torch.from_numpy(audio)
 
@@ -89,20 +104,23 @@ def detect_bpm(audio: NDArray[np.float32], sr: int) -> float | None:
 
     logger.debug("beat_this returned %d beats, %d downbeats", len(beats), len(downbeats))
 
-    if len(beats) >= 3:
-        ibis = np.diff(beats)
-        ibis = ibis[(ibis > 0.2) & (ibis < 2.0)]
-        if len(ibis) >= 2:
-            bpm = 60.0 / float(np.median(ibis))
-            while bpm < 60:
-                bpm *= 2
-            while bpm > 180:
-                bpm /= 2
-            logger.debug("BPM=%.1f from %d valid IBIs (median=%.3fs)", bpm, len(ibis), float(np.median(ibis)))
-            return round(bpm, 1)
-        else:
-            logger.debug("Not enough valid IBIs after filtering (%d)", len(ibis))
-    else:
+    if len(beats) < 3:
         logger.debug("Too few beats (%d) for BPM calculation", len(beats))
+        return None
+    ibis = np.diff(beats)
+    ibis = ibis[(ibis > 0.2) & (ibis < 2.0)]
+    if len(ibis) < 2:
+        logger.debug("Not enough valid IBIs after filtering (%d)", len(ibis))
+        return None
 
-    return None
+    bpm = 60.0 / float(np.median(ibis))
+    while bpm < 60:
+        bpm *= 2
+    while bpm > 180:
+        bpm /= 2
+    grid = fit_beat_grid(beats, downbeats, 60.0 / bpm, len(audio) / sr)
+    logger.debug(
+        "BPM=%.1f from %d valid IBIs (median=%.3fs), grid=%s",
+        bpm, len(ibis), float(np.median(ibis)), grid,
+    )
+    return round(bpm, 1), grid
